@@ -298,8 +298,7 @@ def _trace_negative_cycle(predecessors, start_node):
     through predecessors V times to guarantee we land inside the
     cycle, then walk the cycle once to collect its nodes in order.
     """
-    # Walk back V steps; the counter itself isn't needed, only the
-    # repetitions, so we use `_` by convention.
+    # Walk back V steps;
     node = start_node
     for _ in range(len(predecessors)):
         node = predecessors[node]

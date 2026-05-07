@@ -17,9 +17,6 @@ fi
 if ! python3 -c "import networkx, matplotlib" 2>/dev/null; then
     echo "Installing required packages (networkx, matplotlib) -- one-time setup..."
     if ! python3 -m pip install --user --quiet networkx matplotlib 2>/dev/null; then
-        # Some recent Pythons (PEP 668) refuse --user installs against a
-        # system interpreter; fall back to --break-system-packages with a
-        # warning. Users on a managed Python should create a venv instead.
         echo "Standard install failed; retrying with --break-system-packages..."
         if ! python3 -m pip install --user --quiet --break-system-packages networkx matplotlib; then
             echo
