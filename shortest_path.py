@@ -5,10 +5,6 @@ shortest_path.py
 Shortest Path Project -- Implementation and Analysis of Dijkstra's
 and Bellman-Ford Algorithms.
 
-Author: <student name>
-Course: <course code>
-Date:   2026-05-06
-
 This program loads a weighted graph (a Maryland road network) from a
 text file, then lets the user compute and visualize shortest paths
 between any two cities using Dijkstra's algorithm or the Bellman-Ford
@@ -97,7 +93,8 @@ def load_graph(file_path):
                     f"Line {line_number}: weight '{weight_text}' is not a number"
                 )
 
-            graph.setdefault(from_node, []).append((to_node, weight))
+            # Insert the edge into the adjacency dict.
+            # ensure to_node exists as a key even if it has no outgoing edges of its own
             graph.setdefault(to_node, [])
             if not is_directed:
                 graph.setdefault(to_node, []).append((from_node, weight))
@@ -157,13 +154,21 @@ def dijkstra(graph, source, destination):
 
     while priority_queue:
         current_distance, current_node = heapq.heappop(priority_queue)
-        # Stale heap entry: a shorter distance to current_node was found
-        # after this one was pushed, so this pop carries no new information.
+
+        # heapq has no "decrease-key" operation, so each
+        # time we find a shorter path to a node we PUSH a new entry instead
+        # of updating the old one.
         if current_distance > distances[current_node]:
             continue
+
+        # Early exit: because we always pop the smallest distance first, the
+        # moment the destination comes out of the heap its distance is final.
+        # No later relaxation can improve it, so we can stop the whole search.
         if current_node == destination:
             break
 
+        # Relaxation step: try every outgoing edge from current_node and see
+        # if going through current_node gives a shorter path to the neighbor.
         for neighbor, edge_weight in graph[current_node]:
             tentative_distance = current_distance + edge_weight
             if tentative_distance < distances[neighbor]:
@@ -195,9 +200,12 @@ def bellman_ford(graph, source, destination):
     distances = {node: float("inf") for node in graph}
     predecessors = {node: None for node in graph}
     distances[source] = 0.0
-
+    
+    # Each pass relaxes information by one more edge along every path, so
+    # after V-1 passes every shortest path has been fully discovered.
     for _ in range(len(graph) - 1):
         relaxed_any = False
+        # Inner loop: try to relax EVERY edge in the graph this pass.
         for from_node, neighbors in graph.items():
             for to_node, weight in neighbors:
                 if distances[from_node] + weight < distances[to_node]:
@@ -240,8 +248,8 @@ def _trace_negative_cycle(predecessors, start_node):
     while cursor != node:
         cycle.append(cursor)
         cursor = predecessors[cursor]
-    cycle.append(node)
-    cycle.reverse()
+    cycle.append(node)        # close the loop visually: A -> B -> C -> A
+    cycle.reverse()           # we built it backwards; flip to forward order
     return cycle
 
 
@@ -254,23 +262,30 @@ def reconstruct_path(predecessors, source, destination):
     from source to destination. Returns [] if destination is
     unreachable from source.
     """
+
     if destination not in predecessors:
         return []
+    
+    # this means destination is unreachable from source.
     if predecessors[destination] is None and destination != source:
         return []
 
+    # list ends up in REVERSE order (destination first, source last).
     path = []
     cursor = destination
     while cursor is not None:
         path.append(cursor)
         if cursor == source:
-            break
+            break  # stop before dereferencing predecessors[source] (None)
         cursor = predecessors[cursor]
 
+    # Sanity check: if we never hit source, the chain dead-ended somewhere
+    # else -- treat that as "unreachable" rather than returning a partial
+    # path that doesn't actually start at the source.
     if not path or path[-1] != source:
         return []
 
-    path.reverse()
+    path.reverse()  # flip so the path runs source -> ... -> destination
     return path
 
 
@@ -326,12 +341,18 @@ def visualize_path(graph, is_directed, path, output_file="path.png"):
     nx_graph = _build_networkx_graph(graph, is_directed)
     layout = networkx.spring_layout(nx_graph, seed=42)
 
+    # Build a set of edges that belong to the shortest path. Using a SET
+    # graph into "highlight" or "non-path" buckets.
     path_edges = set()
     for index in range(len(path) - 1):
         path_edges.add((path[index], path[index + 1]))
+        # For undirected graphs we also add the reverse pair
         if not is_directed:
             path_edges.add((path[index + 1], path[index]))
 
+    # Split every edge in the graph into two lists so we can draw them in
+    # two passes (grey first, then red on top -- so the highlighted path
+    # always sits visually above the rest of the graph).
     highlight_edges = []
     non_path_edges = []
     for u, v in nx_graph.edges():
@@ -430,6 +451,9 @@ def show_graph_data(graph, is_directed):
     """Print the graph as a list of nodes and edges."""
     print(f"Directed: {is_directed}")
     print(f"Nodes ({len(graph)}): {', '.join(sorted_node_names(graph))}")
+
+    # Undirected edges are stored twice in the adjacency dict (A->B AND
+    # B->A), so a naive print would show every edge twice.
     seen = set()
     edges = []
     for from_node in sorted_node_names(graph):
