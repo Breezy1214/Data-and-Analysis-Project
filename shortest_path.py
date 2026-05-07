@@ -49,70 +49,97 @@ def load_graph(file_path):
     try:
         input_file = open(file_path, "r", encoding="utf-8")
     except FileNotFoundError:
-        raise FileNotFoundError(f"File not found: {file_path}") from None
+        raise FileNotFoundError("File not found: " + file_path)
 
+    # `with` makes sure the file gets closed when this block ends.
     with input_file:
-        for line_number, raw_line in enumerate(input_file, start=1):
+        line_number = 0
+        for raw_line in input_file:
+            line_number = line_number + 1
+
+            # Drop anything after a `#` (a comment), then trim whitespace.
             line = raw_line.split("#", 1)[0].strip()
-            if not line:
+            if line == "":
                 continue
 
             tokens = line.split()
+
             if not header_seen:
                 if len(tokens) != 3:
                     raise ValueError(
-                        f"Line {line_number}: header must be "
-                        f"'<node_count> <edge_count> <directed|undirected>'"
+                        "Line " + str(line_number) + ": header must be "
+                        "'<node_count> <edge_count> <directed|undirected>'"
                     )
                 try:
                     declared_node_count = int(tokens[0])
                     declared_edge_count = int(tokens[1])
                 except ValueError:
                     raise ValueError(
-                        f"Line {line_number}: node and edge counts must be integers"
+                        "Line " + str(line_number) +
+                        ": node and edge counts must be integers"
                     )
                 direction = tokens[2].lower()
-                if direction not in ("directed", "undirected"):
+                if direction != "directed" and direction != "undirected":
                     raise ValueError(
-                        f"Line {line_number}: third header token must be "
-                        f"'directed' or 'undirected'"
+                        "Line " + str(line_number) +
+                        ": third header token must be 'directed' or 'undirected'"
                     )
-                is_directed = (direction == "directed")
+                if direction == "directed":
+                    is_directed = True
+                else:
+                    is_directed = False
                 header_seen = True
                 continue
 
+            # Every non-header line should be: <from> <to> <weight>
             if len(tokens) != 3:
                 raise ValueError(
-                    f"Line {line_number}: edge must be '<from> <to> <weight>'"
+                    "Line " + str(line_number) +
+                    ": edge must be '<from> <to> <weight>'"
                 )
-            from_node, to_node, weight_text = tokens
+            from_node = tokens[0]
+            to_node = tokens[1]
+            weight_text = tokens[2]
             try:
                 weight = float(weight_text)
             except ValueError:
                 raise ValueError(
-                    f"Line {line_number}: weight '{weight_text}' is not a number"
+                    "Line " + str(line_number) +
+                    ": weight '" + weight_text + "' is not a number"
                 )
 
-            # Insert the edge into the adjacency dict.
-            graph.setdefault(from_node, []).append((to_node, weight))
+            # Add an entry for from_node if it isn't already in the dict,
+            # then record the edge from_node -> to_node.
+            if from_node not in graph:
+                graph[from_node] = []
+            graph[from_node].append((to_node, weight))
+
+            # For undirected graphs we also record the reverse edge
+            # to_node -> from_node, since either direction is valid.
+            # For directed graphs we still need to make sure to_node
+            # appears as a key, even if it has no outgoing edges of
+            # its own.
             if not is_directed:
-                graph.setdefault(to_node, []).append((from_node, weight))
+                if to_node not in graph:
+                    graph[to_node] = []
+                graph[to_node].append((from_node, weight))
             else:
-                # ensure to_node exists as a key even if it has no outgoing edges
-                graph.setdefault(to_node, [])
-            edges_loaded += 1
+                if to_node not in graph:
+                    graph[to_node] = []
+
+            edges_loaded = edges_loaded + 1
 
     if not header_seen:
         raise ValueError("File contains no header line")
     if edges_loaded != declared_edge_count:
         print(
-            f"Warning: header declared {declared_edge_count} edges "
-            f"but {edges_loaded} were read."
+            "Warning: header declared " + str(declared_edge_count) +
+            " edges but " + str(edges_loaded) + " were read."
         )
     if len(graph) != declared_node_count:
         print(
-            f"Warning: header declared {declared_node_count} nodes "
-            f"but {len(graph)} unique nodes were read."
+            "Warning: header declared " + str(declared_node_count) +
+            " nodes but " + str(len(graph)) + " unique nodes were read."
         )
 
     return graph, is_directed
@@ -121,7 +148,8 @@ def load_graph(file_path):
 def has_negative_weight(graph):
     """Return True if any edge in the graph has a negative weight."""
     for neighbors in graph.values():
-        for _, weight in neighbors:
+        for edge in neighbors:
+            weight = edge[1]
             if weight < 0:
                 return True
     return False
@@ -148,30 +176,44 @@ def dijkstra(graph, source, destination):
     """
     start_time = time.perf_counter()
 
-    distances = {node: float("inf") for node in graph}
-    predecessors = {node: None for node in graph}
+    # Start every node at distance "infinity"; we'll lower these as
+    # we find shorter paths from the source.
+    distances = {}
+    predecessors = {}
+    for node in graph:
+        distances[node] = float("inf")
+        predecessors[node] = None
     distances[source] = 0.0
 
-    priority_queue = [(0.0, source)]
+    # The priority queue holds (distance_so_far, node) pairs and
+    # always pops the smallest distance first.
+    priority_queue = []
+    heapq.heappush(priority_queue, (0.0, source))
 
-    while priority_queue:
-        current_distance, current_node = heapq.heappop(priority_queue)
+    while len(priority_queue) > 0:
+        popped = heapq.heappop(priority_queue)
+        current_distance = popped[0]
+        current_node = popped[1]
 
-        # heapq has no "decrease-key" operation, so each
-        # time we find a shorter path to a node we PUSH a new entry instead
-        # of updating the old one.
+        # heapq has no "decrease-key" operation, so each time we find
+        # a shorter path to a node we PUSH a new entry instead of
+        # updating the old one. That means stale, larger entries can
+        # still be in the heap -- skip them when we see them.
         if current_distance > distances[current_node]:
             continue
 
-        # Early exit: because we always pop the smallest distance first, the
-        # moment the destination comes out of the heap its distance is final.
-        # No later relaxation can improve it, so we can stop the whole search.
+        # Early exit: because we always pop the smallest distance
+        # first, the moment the destination comes out of the heap its
+        # distance is final. No later relaxation can improve it.
         if current_node == destination:
             break
 
-        # Relaxation step: try every outgoing edge from current_node and see
-        # if going through current_node gives a shorter path to the neighbor.
-        for neighbor, edge_weight in graph[current_node]:
+        # Relaxation step: for every edge from current_node, check
+        # whether going through current_node gives a shorter path to
+        # the neighbor than what we have stored.
+        for edge in graph[current_node]:
+            neighbor = edge[0]
+            edge_weight = edge[1]
             tentative_distance = current_distance + edge_weight
             if tentative_distance < distances[neighbor]:
                 distances[neighbor] = tentative_distance
@@ -199,27 +241,42 @@ def bellman_ford(graph, source, destination):
     """
     start_time = time.perf_counter()
 
-    distances = {node: float("inf") for node in graph}
-    predecessors = {node: None for node in graph}
+    distances = {}
+    predecessors = {}
+    for node in graph:
+        distances[node] = float("inf")
+        predecessors[node] = None
     distances[source] = 0.0
-    
-    # Each pass relaxes information by one more edge along every path, so
-    # after V-1 passes every shortest path has been fully discovered.
-    for _ in range(len(graph) - 1):
+
+    # Each pass relaxes information by one more edge along every
+    # path, so after V-1 passes every shortest path has been fully
+    # discovered (where V is the number of nodes). We don't need
+    # the loop counter itself, only the number of repetitions, so
+    # we use `_` as the variable name by convention.
+    number_of_nodes = len(graph)
+    for _ in range(number_of_nodes - 1):
         relaxed_any = False
         # Inner loop: try to relax EVERY edge in the graph this pass.
-        for from_node, neighbors in graph.items():
-            for to_node, weight in neighbors:
+        for from_node in graph:
+            for edge in graph[from_node]:
+                to_node = edge[0]
+                weight = edge[1]
                 if distances[from_node] + weight < distances[to_node]:
                     distances[to_node] = distances[from_node] + weight
                     predecessors[to_node] = from_node
                     relaxed_any = True
+        # If no edge was relaxed this pass, no later pass will relax
+        # anything either -- we can stop early.
         if not relaxed_any:
             break
 
+    # After V-1 passes, distances should be final. If we can STILL
+    # relax an edge, that means a negative cycle is reachable.
     negative_cycle = None
-    for from_node, neighbors in graph.items():
-        for to_node, weight in neighbors:
+    for from_node in graph:
+        for edge in graph[from_node]:
+            to_node = edge[0]
+            weight = edge[1]
             if distances[from_node] + weight < distances[to_node]:
                 negative_cycle = _trace_negative_cycle(predecessors, to_node)
                 break
@@ -241,6 +298,8 @@ def _trace_negative_cycle(predecessors, start_node):
     through predecessors V times to guarantee we land inside the
     cycle, then walk the cycle once to collect its nodes in order.
     """
+    # Walk back V steps; the counter itself isn't needed, only the
+    # repetitions, so we use `_` by convention.
     node = start_node
     for _ in range(len(predecessors)):
         node = predecessors[node]
@@ -264,15 +323,14 @@ def reconstruct_path(predecessors, source, destination):
     from source to destination. Returns [] if destination is
     unreachable from source.
     """
-
     if destination not in predecessors:
         return []
-    
-    # this means destination is unreachable from source.
+
+    # destination is unreachable from source.
     if predecessors[destination] is None and destination != source:
         return []
 
-    # list ends up in REVERSE order (destination first, source last).
+    # The list ends up in REVERSE order (destination first, source last).
     path = []
     cursor = destination
     while cursor is not None:
@@ -281,10 +339,10 @@ def reconstruct_path(predecessors, source, destination):
             break  # stop before dereferencing predecessors[source] (None)
         cursor = predecessors[cursor]
 
-    # Sanity check: if we never hit source, the chain dead-ended somewhere
-    # else -- treat that as "unreachable" rather than returning a partial
-    # path that doesn't actually start at the source.
-    if not path or path[-1] != source:
+    # Sanity check: if we never hit source, the chain dead-ended
+    # somewhere else -- treat that as "unreachable" rather than
+    # returning a partial path that doesn't actually start at source.
+    if len(path) == 0 or path[-1] != source:
         return []
 
     path.reverse()  # flip so the path runs source -> ... -> destination
@@ -302,10 +360,20 @@ def _build_networkx_graph(graph, is_directed):
         nx_graph = networkx.Graph()
     for node in graph:
         nx_graph.add_node(node)
-    for from_node, neighbors in graph.items():
-        for to_node, weight in neighbors:
+    for from_node in graph:
+        for edge in graph[from_node]:
+            to_node = edge[0]
+            weight = edge[1]
             nx_graph.add_edge(from_node, to_node, weight=weight)
     return nx_graph
+
+
+def format_weight(weight):
+    """Format an edge weight, dropping the decimal part if whole."""
+    if weight == int(weight):
+        return str(int(weight))
+    else:
+        return str(weight)
 
 
 def visualize_graph(graph, is_directed):
@@ -317,15 +385,21 @@ def visualize_graph(graph, is_directed):
     layout = networkx.spring_layout(nx_graph, seed=42)
 
     figure = pyplot.figure(figsize=(10, 8))
-    networkx.draw_networkx_nodes(nx_graph, layout, node_color="#a8d0e6", node_size=900)
+    networkx.draw_networkx_nodes(
+        nx_graph, layout, node_color="#a8d0e6", node_size=900
+    )
     networkx.draw_networkx_labels(nx_graph, layout, font_size=9)
-    networkx.draw_networkx_edges(nx_graph, layout, edge_color="#888888", width=1.4)
+    networkx.draw_networkx_edges(
+        nx_graph, layout, edge_color="#888888", width=1.4
+    )
 
-    edge_labels = {
-        (u, v): f"{data['weight']:g}"
-        for u, v, data in nx_graph.edges(data=True)
-    }
-    networkx.draw_networkx_edge_labels(nx_graph, layout, edge_labels=edge_labels, font_size=8)
+    # Build a {(u, v): "weight"} dict so we can label every edge.
+    edge_labels = {}
+    for u, v, data in nx_graph.edges(data=True):
+        edge_labels[(u, v)] = format_weight(data["weight"])
+    networkx.draw_networkx_edge_labels(
+        nx_graph, layout, edge_labels=edge_labels, font_size=8
+    )
 
     pyplot.title("Graph (all nodes and edges)")
     pyplot.axis("off")
@@ -343,27 +417,40 @@ def visualize_path(graph, is_directed, path, output_file="path.png"):
     nx_graph = _build_networkx_graph(graph, is_directed)
     layout = networkx.spring_layout(nx_graph, seed=42)
 
-    # Build a set of edges that belong to the shortest path. Using a SET
-    # graph into "highlight" or "non-path" buckets.
+    # Build a set of edges that belong to the shortest path. We use
+    # a set so we can quickly check "is this edge part of the path?".
     path_edges = set()
     for index in range(len(path) - 1):
         path_edges.add((path[index], path[index + 1]))
-        # For undirected graphs we also add the reverse pair
+        # For undirected graphs we also add the reverse pair.
         if not is_directed:
             path_edges.add((path[index + 1], path[index]))
 
-    # Split every edge in the graph into two lists so we can draw them in
-    # two passes (grey first, then red on top -- so the highlighted path
-    # always sits visually above the rest of the graph).
+    # Split every edge into two lists so we can draw them in two
+    # passes: grey first, then red on top. That way the highlighted
+    # path always sits visually above the rest of the graph.
     highlight_edges = []
     non_path_edges = []
-    for u, v in nx_graph.edges():
-        bucket = highlight_edges if (u, v) in path_edges else non_path_edges
-        bucket.append((u, v))
+    for edge in nx_graph.edges():
+        u = edge[0]
+        v = edge[1]
+        if (u, v) in path_edges:
+            highlight_edges.append((u, v))
+        else:
+            non_path_edges.append((u, v))
 
     figure = pyplot.figure(figsize=(10, 8))
-    node_colors = ["#ffb4a2" if node in path else "#a8d0e6" for node in nx_graph.nodes()]
-    networkx.draw_networkx_nodes(nx_graph, layout, node_color=node_colors, node_size=900)
+
+    # Pick a colour for each node: red-ish if it's on the path, blue otherwise.
+    node_colors = []
+    for node in nx_graph.nodes():
+        if node in path:
+            node_colors.append("#ffb4a2")
+        else:
+            node_colors.append("#a8d0e6")
+    networkx.draw_networkx_nodes(
+        nx_graph, layout, node_color=node_colors, node_size=900
+    )
     networkx.draw_networkx_labels(nx_graph, layout, font_size=9)
 
     networkx.draw_networkx_edges(
@@ -375,17 +462,18 @@ def visualize_path(graph, is_directed, path, output_file="path.png"):
         edge_color="#d62828", width=3.0,
     )
 
-    edge_labels = {
-        (u, v): f"{data['weight']:g}"
-        for u, v, data in nx_graph.edges(data=True)
-    }
-    networkx.draw_networkx_edge_labels(nx_graph, layout, edge_labels=edge_labels, font_size=8)
+    edge_labels = {}
+    for u, v, data in nx_graph.edges(data=True):
+        edge_labels[(u, v)] = format_weight(data["weight"])
+    networkx.draw_networkx_edge_labels(
+        nx_graph, layout, edge_labels=edge_labels, font_size=8
+    )
 
-    pyplot.title(f"Shortest path: {' -> '.join(path)}")
+    pyplot.title("Shortest path: " + " -> ".join(path))
     pyplot.axis("off")
     pyplot.tight_layout()
     pyplot.savefig(output_file, dpi=150, bbox_inches="tight")
-    print(f"Path figure saved to {output_file}")
+    print("Path figure saved to " + output_file)
     pyplot.show()
     pyplot.close(figure)
 
@@ -423,49 +511,75 @@ def prompt_for_node(graph, prompt_text):
         choice = input(prompt_text).strip()
         if choice in graph:
             return choice
-        print(f"Unknown node: {choice!r}")
-        print(f"Available nodes: {', '.join(nodes)}")
+        print("Unknown node: " + repr(choice))
+        print("Available nodes: " + ", ".join(nodes))
 
 
 def prompt_for_file_path(default_path="graph.txt"):
     """Prompt for an input file path, defaulting to graph.txt."""
-    raw = input(f"Input file [{default_path}]: ").strip()
-    # Windows Explorer's "Copy as path" wraps the path in double quotes;
-    # strip a matching pair so pasted paths just work.
-    if len(raw) >= 2 and raw[0] == raw[-1] and raw[0] in ('"', "'"):
+    raw = input("Input file [" + default_path + "]: ").strip()
+    # Windows Explorer's "Copy as path" wraps the path in double
+    # quotes; strip a matching pair so pasted paths just work.
+    if len(raw) >= 2 and raw[0] == raw[-1] and (raw[0] == '"' or raw[0] == "'"):
         raw = raw[1:-1].strip()
-    return raw if raw else default_path
+    if raw == "":
+        return default_path
+    else:
+        return raw
 
 
 def print_load_summary(graph, is_directed, file_path):
     """Print 'Loaded N nodes and M edges from <path>'."""
-    edge_count = sum(len(neighbors) for neighbors in graph.values())
+    edge_count = 0
+    for neighbors in graph.values():
+        edge_count = edge_count + len(neighbors)
+    # Undirected graphs store every edge twice (A->B and B->A), so
+    # divide by 2 to get the number of distinct edges.
     if not is_directed:
-        edge_count //= 2
-    print(f"Loaded {len(graph)} nodes and {edge_count} edges from {file_path}.")
+        edge_count = edge_count // 2
+    print(
+        "Loaded " + str(len(graph)) + " nodes and " +
+        str(edge_count) + " edges from " + file_path + "."
+    )
 
 
 def show_graph_data(graph, is_directed):
     """Print the graph as a list of nodes and edges."""
-    print(f"Directed: {is_directed}")
-    print(f"Nodes ({len(graph)}): {', '.join(sorted_node_names(graph))}")
+    print("Directed: " + str(is_directed))
+    print(
+        "Nodes (" + str(len(graph)) + "): " +
+        ", ".join(sorted_node_names(graph))
+    )
 
-    # Undirected edges are stored twice in the adjacency dict (A->B AND
-    # B->A), so a naive print would show every edge twice.
+    # Undirected edges are stored twice in the adjacency dict (A->B
+    # AND B->A), so a naive print would show every edge twice. We
+    # track edges we've already seen and skip the duplicates.
     seen = set()
     edges = []
     for from_node in sorted_node_names(graph):
-        for to_node, weight in graph[from_node]:
+        for edge in graph[from_node]:
+            to_node = edge[0]
+            weight = edge[1]
             if not is_directed:
                 key = tuple(sorted([from_node, to_node]))
                 if key in seen:
                     continue
                 seen.add(key)
             edges.append((from_node, to_node, weight))
-    print(f"Edges ({len(edges)}):")
-    for from_node, to_node, weight in edges:
-        arrow = "->" if is_directed else "--"
-        print(f"  {from_node} {arrow} {to_node}  ({weight:g})")
+
+    print("Edges (" + str(len(edges)) + "):")
+    if is_directed:
+        arrow = "->"
+    else:
+        arrow = "--"
+    for edge in edges:
+        from_node = edge[0]
+        to_node = edge[1]
+        weight = edge[2]
+        print(
+            "  " + from_node + " " + arrow + " " + to_node +
+            "  (" + format_weight(weight) + ")"
+        )
 
 
 def confirm_dijkstra_with_negatives(graph):
@@ -476,12 +590,18 @@ def confirm_dijkstra_with_negatives(graph):
         "Dijkstra's algorithm is not guaranteed to be correct on such graphs."
     )
     answer = input("Continue with Dijkstra anyway? [Y/n]: ").strip().lower()
-    return answer in ("", "y", "yes")
+    if answer == "" or answer == "y" or answer == "yes":
+        return True
+    else:
+        return False
 
 
 def format_path(path):
     """Format a list of node names as 'A -> B -> C', or '(no path)'."""
-    return " -> ".join(path) if path else "(no path)"
+    if len(path) == 0:
+        return "(no path)"
+    else:
+        return " -> ".join(path)
 
 
 def format_distance(distance):
@@ -490,7 +610,12 @@ def format_distance(distance):
         return "INF"
     if distance == float("-inf"):
         return "-INF"
-    return f"{distance:g}"
+    return format_weight(distance)
+
+
+def format_runtime_ms(runtime_ms):
+    """Format a runtime in milliseconds with three decimal places."""
+    return "{:.3f}".format(runtime_ms)
 
 
 def run_dijkstra_option(graph):
@@ -501,32 +626,34 @@ def run_dijkstra_option(graph):
     destination = prompt_for_node(graph, "Destination node: ")
     distance, path, runtime_ms = dijkstra(graph, source, destination)
     print()
-    print(f"Source:      {source}")
-    print(f"Destination: {destination}")
-    print(f"Distance:    {format_distance(distance)}")
-    print(f"Path:        {format_path(path)}")
-    print(f"Runtime:     {runtime_ms:.3f} ms")
-    if not path and distance == float("inf"):
-        print(f"No path from {source} to {destination}")
+    print("Source:      " + source)
+    print("Destination: " + destination)
+    print("Distance:    " + format_distance(distance))
+    print("Path:        " + format_path(path))
+    print("Runtime:     " + format_runtime_ms(runtime_ms) + " ms")
+    if len(path) == 0 and distance == float("inf"):
+        print("No path from " + source + " to " + destination)
 
 
 def run_bellman_ford_option(graph):
     """Handle menu option 3: prompt and run Bellman-Ford."""
     source = prompt_for_node(graph, "Source node: ")
     destination = prompt_for_node(graph, "Destination node: ")
-    distance, path, runtime_ms, negative_cycle = bellman_ford(graph, source, destination)
+    distance, path, runtime_ms, negative_cycle = bellman_ford(
+        graph, source, destination
+    )
     print()
-    print(f"Source:      {source}")
-    print(f"Destination: {destination}")
+    print("Source:      " + source)
+    print("Destination: " + destination)
     if negative_cycle is not None:
         print("Negative cycle detected -- no shortest path defined.")
-        print(f"Cycle: {' -> '.join(negative_cycle)}")
+        print("Cycle: " + " -> ".join(negative_cycle))
     else:
-        print(f"Distance:    {format_distance(distance)}")
-        print(f"Path:        {format_path(path)}")
-        if not path and distance == float("inf"):
-            print(f"No path from {source} to {destination}")
-    print(f"Runtime:     {runtime_ms:.3f} ms")
+        print("Distance:    " + format_distance(distance))
+        print("Path:        " + format_path(path))
+        if len(path) == 0 and distance == float("inf"):
+            print("No path from " + source + " to " + destination)
+    print("Runtime:     " + format_runtime_ms(runtime_ms) + " ms")
 
 
 def run_comparison_option(graph):
@@ -536,34 +663,55 @@ def run_comparison_option(graph):
 
     if has_negative_weight(graph):
         print(
-            "Note: graph has negative-weight edges. Dijkstra's result may be incorrect; "
-            "running it anyway for comparison."
+            "Note: graph has negative-weight edges. Dijkstra's result may "
+            "be incorrect; running it anyway for comparison."
         )
 
     dij_distance, dij_path, dij_ms = dijkstra(graph, source, destination)
-    bf_distance, bf_path, bf_ms, bf_cycle = bellman_ford(graph, source, destination)
+    bf_distance, bf_path, bf_ms, bf_cycle = bellman_ford(
+        graph, source, destination
+    )
 
     print()
-    print(f"Source:      {source}")
-    print(f"Destination: {destination}")
+    print("Source:      " + source)
+    print("Destination: " + destination)
     print()
-    header = f"{'Algorithm':<14} {'Distance':<10} {'Path':<50} {'Time (ms)':>10}"
+
+    # Build a fixed-width table by padding each column to a set width.
+    header = (
+        "Algorithm".ljust(14) + " " +
+        "Distance".ljust(10) + " " +
+        "Path".ljust(50) + " " +
+        "Time (ms)".rjust(10)
+    )
     print(header)
     print("-" * len(header))
-    print(
-        f"{'Dijkstra':<14} {format_distance(dij_distance):<10} "
-        f"{format_path(dij_path):<50} {dij_ms:>10.3f}"
+
+    dij_row = (
+        "Dijkstra".ljust(14) + " " +
+        format_distance(dij_distance).ljust(10) + " " +
+        format_path(dij_path).ljust(50) + " " +
+        format_runtime_ms(dij_ms).rjust(10)
     )
+    print(dij_row)
+
     if bf_cycle is not None:
         cycle_text = "Negative cycle: " + " -> ".join(bf_cycle)
-        print(
-            f"{'Bellman-Ford':<14} {'-INF':<10} {cycle_text:<50} {bf_ms:>10.3f}"
+        bf_row = (
+            "Bellman-Ford".ljust(14) + " " +
+            "-INF".ljust(10) + " " +
+            cycle_text.ljust(50) + " " +
+            format_runtime_ms(bf_ms).rjust(10)
         )
     else:
-        print(
-            f"{'Bellman-Ford':<14} {format_distance(bf_distance):<10} "
-            f"{format_path(bf_path):<50} {bf_ms:>10.3f}"
+        bf_row = (
+            "Bellman-Ford".ljust(14) + " " +
+            format_distance(bf_distance).ljust(10) + " " +
+            format_path(bf_path).ljust(50) + " " +
+            format_runtime_ms(bf_ms).rjust(10)
         )
+    print(bf_row)
+
     print()
     if bf_cycle is None and dij_distance == bf_distance:
         print("Both algorithms agree.")
@@ -576,15 +724,23 @@ def run_visualize_path_option(graph, is_directed):
     use_dijkstra = confirm_dijkstra_with_negatives(graph)
     source = prompt_for_node(graph, "Source node: ")
     destination = prompt_for_node(graph, "Destination node: ")
+    # We only need the path here, not the distance or runtime, so
+    # we pull index 1 out of the result tuple.
     if use_dijkstra:
-        _, path, _ = dijkstra(graph, source, destination)
+        dijkstra_result = dijkstra(graph, source, destination)
+        path = dijkstra_result[1]
     else:
-        _, path, _, negative_cycle = bellman_ford(graph, source, destination)
+        bellman_result = bellman_ford(graph, source, destination)
+        path = bellman_result[1]
+        negative_cycle = bellman_result[3]
         if negative_cycle is not None:
             print("Negative cycle detected -- cannot visualize a shortest path.")
             return
-    if not path:
-        print(f"No path from {source} to {destination} -- nothing to draw.")
+    if len(path) == 0:
+        print(
+            "No path from " + source + " to " + destination +
+            " -- nothing to draw."
+        )
         return
     visualize_path(graph, is_directed, path)
 
@@ -596,7 +752,7 @@ def main():
     try:
         graph, is_directed = load_graph(file_path)
     except (FileNotFoundError, ValueError) as error:
-        print(f"Error loading {file_path}: {error}")
+        print("Error loading " + file_path + ": " + str(error))
         sys.exit(1)
     print_load_summary(graph, is_directed, file_path)
 
@@ -621,12 +777,12 @@ def main():
                 graph, is_directed = load_graph(file_path)
                 print_load_summary(graph, is_directed, file_path)
             except (FileNotFoundError, ValueError) as error:
-                print(f"Error loading {file_path}: {error}")
+                print("Error loading " + file_path + ": " + str(error))
         elif choice == "8":
             print("Goodbye.")
             return
         else:
-            print(f"Unknown option: {choice!r}")
+            print("Unknown option: " + repr(choice))
 
 
 if __name__ == "__main__":
