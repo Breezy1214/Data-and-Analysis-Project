@@ -94,10 +94,12 @@ def load_graph(file_path):
                 )
 
             # Insert the edge into the adjacency dict.
-            # ensure to_node exists as a key even if it has no outgoing edges of its own
-            graph.setdefault(to_node, [])
+            graph.setdefault(from_node, []).append((to_node, weight))
             if not is_directed:
                 graph.setdefault(to_node, []).append((from_node, weight))
+            else:
+                # ensure to_node exists as a key even if it has no outgoing edges
+                graph.setdefault(to_node, [])
             edges_loaded += 1
 
     if not header_seen:
