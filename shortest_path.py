@@ -416,10 +416,6 @@ def print_menu():
 
 
 def prompt_for_node(graph, prompt_text):
-    """
-    Repeatedly prompt the user for a node name until they enter one
-    that exists in the graph. Returns the node name.
-    """
     nodes = sorted_node_names(graph)
     while True:
         choice = input(prompt_text).strip()
@@ -471,12 +467,6 @@ def show_graph_data(graph, is_directed):
 
 
 def confirm_dijkstra_with_negatives(graph):
-    """
-    If the graph has negative weights, warn the user and ask whether
-    to continue with Dijkstra anyway. Returns True to continue, False
-    to abort. Defaults to True on empty input so a demo of Dijkstra
-    misbehaving on negative weights is one keystroke away.
-    """
     if not has_negative_weight(graph):
         return True
     print(
