@@ -1,0 +1,18 @@
+# Default sample: 9 central-Maryland cities, 14 roads (undirected).
+# Format: first non-comment line is "<node_count> <edge_count> <directed|undirected>"
+# Then one edge per line: <from> <to> <weight>  (weights are miles).
+9 14 undirected
+Baltimore Annapolis 30
+Baltimore Frederick 50
+Baltimore Bowie 25
+Baltimore Laurel 20
+Annapolis Bowie 20
+Annapolis Salisbury 95
+Bowie Lanham 6
+Bowie Laurel 12
+Lanham Laurel 10
+Lanham Rockville 25
+Laurel Rockville 25
+Frederick Rockville 30
+Frederick Hagerstown 25
+Rockville Hagerstown 55

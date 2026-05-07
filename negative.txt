@@ -1,0 +1,17 @@
+# Directed graph designed to make Dijkstra produce the WRONG answer
+# while Bellman-Ford produces the correct one.
+#
+# Edges:
+#   A -> D =   2   (a tempting short direct path)
+#   A -> B =   5
+#   B -> C =   1
+#   C -> D = -10   (the negative edge that makes the long route win)
+#
+# Real shortest path A -> D = 5 + 1 + (-10) = -4   via A -> B -> C -> D
+# Dijkstra returns 2 via A -> D, because it pops D from the heap with
+# distance 2 and terminates before C -> D is ever relaxed.
+4 4 directed
+A D 2
+A B 5
+B C 1
+C D -10

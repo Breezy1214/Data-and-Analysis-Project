@@ -1,0 +1,22 @@
+# Maryland road network: 15 cities, real-ish road distances in miles (undirected).
+# Distances are approximate driving miles, rounded to multiples of 5
+# where possible. Not straight-line distances.
+15 18 undirected
+Baltimore Annapolis 30
+Baltimore Frederick 50
+Baltimore Bowie 25
+Baltimore Towson 10
+Annapolis Bowie 20
+Annapolis Salisbury 95
+Bowie Laurel 12
+Bowie CollegePark 13
+Laurel SilverSpring 15
+SilverSpring Bethesda 5
+Bethesda Rockville 6
+Rockville Gaithersburg 5
+Gaithersburg Frederick 25
+Frederick Hagerstown 25
+Hagerstown Cumberland 75
+Salisbury OceanCity 30
+CollegePark SilverSpring 7
+Towson Frederick 45
